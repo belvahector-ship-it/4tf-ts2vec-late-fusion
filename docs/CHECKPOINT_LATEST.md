@@ -190,6 +190,29 @@ Mapping kondisi→branch (DS-03 Table 3.10): 1TF=[1h]→64; 2TF=[15m,1h]→128; 
 
 **Catatan eksekusi:** `EmbeddingPipeline` butuh checkpoint branch (M8) untuk encode window real → embedding branch → fused. Baru 1 checkpoint real ada (1h/seed42). Menghasilkan 14 file fused/seed × 5 seed butuh 20 checkpoint M8 dulu (blocked oleh M8 full-run, lihat "Sisa yang belum dijalankan"). Logika fusi (inti M9) sudah teruji penuh dgn embedding sintetis + stub encoder.
 
+### M10.5 — External Baselines (HMM + KM-PCA) — **IN PROGRESS, BLOCKED (pending keputusan user)**
+
+**Status: BELUM ADA KODE DITULIS.** Sesi ini baru sampai tahap baca-spec + verifikasi data + menemukan kontradiksi spec KM-PCA, lalu BERHENTI untuk tanya user (sesuai protokol). Tidak ada `src/models/external_baselines.py` atau test M10.5 yang dibuat. **Tidak ada kode yang mengasumsikan salah satu opsi KM-PCA.**
+
+**Yang SUDAH dipahami/diverifikasi:**
+- Spec M10.5 dibaca lengkap (IMP-01 v1.3 baris 580–619 + DS-03 §4 baris 144–149 + base.yaml blok `external_baselines`).
+- Input dikonfirmasi dari data real M5: `train_features.parquet` (26,285 baris) / `test_features.parquet` (8,760 baris). Tepat **7 kolom fitur 1h**: `open_return_1h, high_return_1h, low_return_1h, close_return_1h, volume_zscore_1h, hl_range_1h, body_ratio_1h`. (Total 28 kolom fitur = 7×4 timeframe; M10.5 hanya pakai yang `_1h`.)
+- **HMM: TIDAK ambigu** — GaussianHMM (hmmlearn 0.3.2, sudah terinstall), `n_components ∈ {2,3,4}` pilih via **BIC** (`GaussianHMM.bic(X)` ada di 0.3.2), fit pada sequence train terurut waktu, predict state labels. Siap dikode begitu keputusan KM-PCA keluar (dikerjakan sekaligus supaya `ExternalBaselineRunner` yang menaungi keduanya tidak setengah jadi).
+
+**🚩 KONTRADIKSI SPEC KM-PCA (INI YANG DI-PENDING):**
+- Semua sumber bilang KM-PCA pakai **"7 features, 1h resolution"** (DS-03 §4 baris 149, base.yaml `km_pca.input_timeframe: 1h`, IMP-01 baris 607) **DAN** `PCA(n_components=10)` (base.yaml `km_pca.pca_components: 10`, DS-03 baris 149, IMP-01 baris 601/609).
+- **Mustahil secara matematis:** PCA maksimum menghasilkan `min(n_samples, n_features)=7` komponen. `PCA(n_components=10)` pada input 7-dim → `ValueError` di sklearn. Kemungkinan `pca_components=10` adalah sisa dari konteks berdimensi lebih tinggi.
+- **3 opsi yang sudah dianalisis (trade-off):**
+  1. **Pertahankan 7 fitur, PCA=min(10,7)=7** — full-rank rotation/whitening (tanpa reduksi dimensi) lalu KMeans. Paling konsisten dgn "7 features, 1h resolution". *Trade-off:* PCA jadi ~no-op (hanya dekorelasi), tapi tetap baseline valid & sebanding dgn 1TF/BL-1h.
+  2. **Pertahankan 7 fitur, PCA=5** — reduksi dimensi nyata (7→5). *Trade-off:* 5 angka BARU, tak ada di dokumen manapun (pilihan sepihak), butuh justifikasi.
+  3. **Pakai semua 28 fitur, PCA=10** — 28→10, `PCA(10)` jadi literal valid. *Trade-off:* KONTRADIKSI dgn "7 features, 1h resolution" di 3 tempat, DAN memberi KM-PCA lebih banyak info daripada baseline 1TF/BL-1h yang dibandingkan → bisa merusak keadilan perbandingan.
+- **Keputusan user:** DITUNDA. Kemungkinan perlu cek dokumen sumber (Sobreiro et al. / DS-03 asli) soal asal-usul angka PCA(10) sebelum final. **JANGAN diputuskan sepihak.**
+
+**MULAI DARI SINI di sesi berikutnya (jangan re-analisis dari nol):**
+1. Begitu user memutuskan opsi KM-PCA (1/2/3 atau lain), tulis `src/models/external_baselines.py`: `HMMBaseline` (fit_select via BIC / predict), `KMeansPCABaseline` (fit_select via Silhouette / predict — pakai keputusan PCA), `ExternalBaselineRunner` (orkestrasi 2 metode × 5 seed = 10 run, tulis output ke `experiments/{exp_id}/external_baselines/{hmm,kmpca}/`).
+2. Test pakai DATA REAL M5 (`train_features.parquet`/`test_features.parquet`, kolom `_1h`) — bukan synthetic. Target lulus **V-EXP-004** (5-seed protocol utk HMM & KM-PCA).
+3. M10.5 independen dari M6/M7/M8/M9 dan dari proses Kaggle (M8 20-run GPU) — tidak ada interaksi.
+
 ## Item Terbuka
 1. **[SELESAI]** ~~Commit hash TS2Vec~~ — status "Pinned".
 2. **[SELESAI — terlewati]** ~~Jalankan `setup_and_verify.sh`~~ — tujuannya (buktikan M0–M6 lulus di environment penuh) sudah tercapai jauh melampaui itu: venv 3.11 dibuat, 301 test lulus, pipeline M1–M6 diverifikasi dengan DATA REAL, bahkan M8 smoke-test 1 run sukses. Skrip `.sh` aslinya tak bisa jalan apa adanya (lihat Sesi 9) dan sudah tidak relevan.
@@ -197,7 +220,7 @@ Mapping kondisi→branch (DS-03 Table 3.10): 1TF=[1h]→64; 2TF=[15m,1h]→128; 
    - Dicek: MSVC C++ Build Tools **TIDAK ADA** di mesin ini (vswhere/cl.exe/registry semua nihil).
    - `hmmlearn==0.3.2` → **wheel prebuilt cp311/win tersedia**, terinstall bersih.
    - `hdbscan==0.8.38.post1` (pin lama) → **tak ada wheel** (harus compile). Wheel prebuilt tersedia untuk **`hdbscan==0.8.40`** yang **kompatibel & mempertahankan `scikit-learn==1.5.0`** (versi 0.8.44 ditolak karena memaksa sklearn→1.9.0). sklearn built-in `HDBSCAN` tak punya `approximate_predict`, jadi paket standalone tetap wajib.
-   - **DEVIASI pin (minor, perlu diketahui):** `hdbscan` **0.8.38.post1 → 0.8.40** (sebelumnya belum pernah benar-benar terinstall, jadi tak ada hasil yang berubah). Same maintainer, same API `approximate_predict`. Menghindari install MSVC ~GB. `requirements.txt` diperbarui + catatan.
+   - **DEVIASI pin (minor, DISETUJUI USER — FINAL):** `hdbscan` **0.8.38.post1 → 0.8.40** (sebelumnya belum pernah benar-benar terinstall, jadi tak ada hasil yang berubah). Same maintainer, same API `approximate_predict`. sklearn tetap **1.5.0** pinned. Menghindari install MSVC ~GB. **Keputusan final (disetujui user): pakai wheel prebuilt 0.8.40, TIDAK diulang dengan MSVC.** `requirements.txt` + `environment.yml` diperbarui + catatan (commit `0633764`).
    - **Verifikasi:** `import hdbscan` (0.8.40) + `import hmmlearn` (0.3.2) sukses; `HDBSCAN.fit` + `approximate_predict` smoke OK; `sklearn` tetap 1.5.0; `numpy` tetap 1.26.4. **Full suite tetap 340 passed (0 regresi).**
    - **Metode instalasi (referensi environment setup):** `uv pip install --python .\.venv\Scripts\python.exe --only-binary=:all: "hdbscan==0.8.40" "hmmlearn==0.3.2" "scikit-learn==1.5.0"`. M10 & M10.5 kini TIDAK lagi terblokir install.
 4. `.docx` asli DS-04 (dan cek DS-03 asli) — masih berpotensi mengandung versi lama sebelum audit LC-4; relevan hanya kalau dipakai di luar repo untuk sidang/laporan. Sumber kebenaran tetap file `.md` di `docs/`.
@@ -214,7 +237,7 @@ Mapping kondisi→branch (DS-03 Table 3.10): 1TF=[1h]→64; 2TF=[15m,1h]→128; 
 - [x] M7 — TS2Vec Wrapper — **[SELESAI sesi 9: kode+18 test hijau; gate torch-2.3.1 terverifikasi; 2 friksi menunggu keputusan user, lihat bagian M7]**
 - [x] M8 — Branch Training — **[KODE+13 test hijau; M1-M6 diverifikasi DATA REAL; smoke-test 1 run (1h/seed42) SUKSES; 19 run sisa perlu GPU]**
 - [x] M9 — Fusion — **[KODE+39 test hijau sesi 9 (340 total); eksekusi fused-embeddings menunggu 20 checkpoint M8]**
-- [ ] M10.5 — External Baselines (HMM + KM-PCA) — hanya depends M5; **BLOCKER: hmmlearn belum terinstall (Item Terbuka #3)**
+- [~] M10.5 — External Baselines (HMM + KM-PCA) — **IN PROGRESS, BLOCKED on KM-PCA spec decision (PENDING user)**. hmmlearn+hdbscan sudah terinstall; HMM tak ambigu; KM-PCA `PCA(10)` vs 7 fitur 1h kontradiktif → menunggu keputusan. Belum ada kode. Lihat bagian "M10.5" di atas.
 - [ ] M10 — HDBSCAN Clustering
 - [ ] M11 — Evaluation
 - [ ] M12 — Visualization (paralel M14)
