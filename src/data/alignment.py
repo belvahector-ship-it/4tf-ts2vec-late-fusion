@@ -158,6 +158,47 @@ class TemporalAligner:
             )
         return result
 
+    def _reindex_highfreq_to_grid(
+        self,
+        df: pd.DataFrame,
+        target_index: pd.DatetimeIndex,
+        present_index: pd.DatetimeIndex,
+    ) -> pd.DataFrame:
+        """
+        Reindex a high-frequency source (1h anchor or 15m-aggregated) onto
+        the complete hourly grid, filling exchange-outage holes (ADR-023).
+
+        For every hour in `target_index` that had no source candle
+        (`present_index`): O/H/L/C are last-observation-carried-forward
+        (no look-ahead — only a prior candle is ever used), and volume is
+        set to 0.0 (no trading occurred during the outage). Hours that DID
+        have a candle keep their real values unchanged.
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Source OHLCV with a `timestamp` column.
+        target_index : pd.DatetimeIndex
+            The complete hourly grid to reindex onto.
+        present_index : pd.DatetimeIndex
+            The timestamps that genuinely had a source candle.
+
+        Returns
+        -------
+        pd.DataFrame
+            One row per `target_index` hour, columns: timestamp, open,
+            high, low, close, volume.
+        """
+        s = df.set_index("timestamp").reindex(target_index)
+        missing_mask = ~s.index.isin(present_index)
+        for col in ("open", "high", "low", "close"):
+            s[col] = s[col].ffill()
+        s.loc[missing_mask, "volume"] = 0.0
+        s = s.reset_index().rename(columns={"index": "timestamp"})
+        if "timestamp" not in s.columns:  # defensive (index had no name)
+            s = s.rename(columns={s.columns[0]: "timestamp"})
+        return s
+
     def build_master(self, dfs: dict[str, pd.DataFrame]) -> pd.DataFrame:
         """
         Build the full 21-column master DataFrame from all four timeframes.
@@ -187,15 +228,32 @@ class TemporalAligner:
             raise ValueError(f"build_master is missing timeframes: {missing}")
 
         df_1h = dfs["1h"].sort_values("timestamp").reset_index(drop=True)
-        target_index = pd.DatetimeIndex(df_1h["timestamp"])
 
-        # 2a: 15m -> 1h aggregation
-        agg_15m = self.aggregate_15m_to_1h(dfs["15m"])
-        agg_15m = agg_15m.set_index("timestamp").reindex(target_index).reset_index()
-        agg_15m = agg_15m.rename(columns={"index": "timestamp"})
+        # Complete hourly grid over the observed span (ADR-023). Real
+        # exchange outages leave holes in the 1h anchor; anchoring on the
+        # actual 1h timestamps would shorten the master and shift every
+        # LC-4-audited downstream count. Instead we reindex to a gap-free
+        # hourly grid: missing hours receive last-observation-carried-
+        # forward PRICES (O/H/L/C — no look-ahead) and volume=0 (no
+        # trading occurred during the outage). This preserves the full
+        # 35,064-hour temporal structure the whole pipeline assumes.
+        full_index = pd.date_range(
+            start=df_1h["timestamp"].min(),
+            end=df_1h["timestamp"].max(),
+            freq="1h",
+        )
+        target_index = pd.DatetimeIndex(full_index, name="timestamp")
 
-        # 2b: 1h identity
-        anchor_1h = df_1h.copy()
+        # 2a: 15m -> 1h aggregation (then gap-fill onto the full grid)
+        agg_15m_raw = self.aggregate_15m_to_1h(dfs["15m"])
+        agg_15m = self._reindex_highfreq_to_grid(
+            agg_15m_raw, target_index, pd.DatetimeIndex(agg_15m_raw["timestamp"])
+        )
+
+        # 2b: 1h identity (gap-filled onto the full grid)
+        anchor_1h = self._reindex_highfreq_to_grid(
+            df_1h, target_index, pd.DatetimeIndex(df_1h["timestamp"])
+        )
 
         # 2c, 2d: 4h and 1d forward-fill
         ff_4h = self.forward_fill_to_1h(dfs["4h"], "4h", target_index)
@@ -360,6 +418,35 @@ def verify_no_lookahead(
     return results
 
 
+def verify_grid_completeness(master_df: pd.DataFrame) -> tuple[bool, str]:
+    """
+    Verify the master spans a gap-free hourly grid (ADR-023).
+
+    After the M3 reindex, every consecutive pair of timestamps must be
+    exactly 1 hour apart — no exchange-outage holes remain. This is the
+    structural guarantee that all downstream LC-4-audited counts
+    (35,045 features; N_test_windows=8,760) rest on.
+
+    Returns
+    -------
+    tuple[bool, str]
+        (passed, detail).
+    """
+    ts = master_df["timestamp"]
+    if len(ts) < 2:
+        return True, "grid completeness trivially OK (<2 rows)"
+    deltas = ts.diff().dropna()
+    one_hour = pd.Timedelta(hours=1)
+    bad = int((deltas != one_hour).sum())
+    if bad > 0:
+        first_bad = ts.iloc[1:][deltas.to_numpy() != one_hour].iloc[0]
+        return False, (
+            f"{bad} non-1h step(s) in the hourly grid (first near {first_bad}); "
+            "reindex did not produce a gap-free grid."
+        )
+    return True, f"hourly grid complete: {len(ts)} rows, all steps = 1h"
+
+
 def check_master_schema(
     master_df: pd.DataFrame,
     expected_rows: int | None = EXPECTED_MASTER_ROWS,
@@ -471,6 +558,15 @@ def build_and_verify_master(
             raise AlignmentError(f"Master DataFrame schema check failed: {schema_detail}")
     else:
         logger.info("M3 schema check PASSED: %s", schema_detail)
+
+    # ADR-023: the reindexed master must be a gap-free hourly grid.
+    grid_passed, grid_detail = verify_grid_completeness(master)
+    if not grid_passed:
+        logger.error("M3 grid-completeness check FAILED: %s", grid_detail)
+        if raise_on_failure:
+            raise AlignmentError(f"Master grid completeness failed: {grid_detail}")
+    else:
+        logger.info("M3 grid-completeness check PASSED: %s", grid_detail)
 
     all_lookahead_results: list[LookaheadCheckResult] = []
     for tf in ("4h", "1d"):

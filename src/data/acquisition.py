@@ -222,6 +222,20 @@ class BinanceDownloader:
 
         df = pd.DataFrame(all_candles, columns=list(RAW_COLUMNS))
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
+
+        # Trim to the requested [start, end] window. Binance pagination
+        # appends whole pages of up to 1000 candles and only the *cursor*
+        # is bounded by end_ms — the candles in the final page routinely
+        # overshoot the study end (the exchange serves data up to the
+        # present), and earlier logic never removed them. Without this
+        # trim, raw files contain out-of-study rows (e.g. 1d reaching
+        # 2025), which fails V-DATA-001 and corrupts M3 alignment and
+        # every downstream leakage boundary. Bounds are inclusive, matching
+        # this method's documented [start, end] semantics.
+        start_ts = pd.to_datetime(since, unit="ms", utc=True)
+        end_ts = pd.to_datetime(end_ms, unit="ms", utc=True)
+        df = df[(df["timestamp"] >= start_ts) & (df["timestamp"] <= end_ts)]
+
         df = df.drop_duplicates(subset="timestamp").sort_values("timestamp")
         df = df.reset_index(drop=True)
 

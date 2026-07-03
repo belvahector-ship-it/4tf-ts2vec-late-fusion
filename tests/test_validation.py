@@ -229,6 +229,33 @@ class TestCheckDateCoverage:
         df = _make_clean_df(n=100, timeframe="1h", start="2020-01-01")
         assert not validator.check_date_coverage(df, "2020-01-01", "2023-12-31")
 
+    @pytest.mark.parametrize(
+        "timeframe,periods",
+        [("15m", 96 * 3), ("1h", 24 * 3), ("4h", 6 * 3), ("1d", 3)],
+    )
+    def test_timeframe_aware_last_candle_passes(
+        self, validator, timeframe, periods
+    ) -> None:
+        """
+        Regression (ADR-022 / DS-04 amendment): a timeframe whose last
+        candle is NOT at 23:00 (4h ends 20:00, 1d ends 00:00) must still
+        count as full coverage of the end date. Found on first real run:
+        a fixed 23:00 boundary wrongly rejected 4h/1d.
+        """
+        # 3 full days starting 2020-01-01; end date is the 3rd day.
+        df = _make_clean_df(n=periods, timeframe=timeframe, start="2020-01-01")
+        assert validator.check_date_coverage(
+            df, "2020-01-01", "2020-01-03", timeframe
+        )
+
+    def test_coverage_stops_one_candle_short_fails(self, validator) -> None:
+        """Dropping the final candle of the end day must fail coverage."""
+        df = _make_clean_df(n=6 * 3, timeframe="4h", start="2020-01-01")
+        df_short = df.iloc[:-1]  # drop the 2020-01-03 20:00 candle
+        assert not validator.check_date_coverage(
+            df_short, "2020-01-01", "2020-01-03", "4h"
+        )
+
 
 # --- check_gap_ratio -----------------------------------------------------------------
 
@@ -334,6 +361,45 @@ class TestValidateTimeframe:
         with pytest.raises(DataValidationError) as exc_info:
             validator.validate_timeframe(df, "1h", raise_on_failure=True)
         assert "columns_present" in str(exc_info.value)
+
+    def test_large_single_gap_is_warning_not_failure(self, validator) -> None:
+        """
+        ADR-022 regression: a single large gap (real-exchange-outage
+        analogue) must NOT abort validation as long as the aggregate
+        gap ratio stays under 5% — it is recorded/logged as a WARNING.
+        Guards the 2020-02-19-style Binance-outage case found on the
+        first real M1 run (2026-07-03).
+        """
+        # 1000 clean hourly candles; end_date at 23:00 must be <= last ts.
+        df = _make_clean_df(n=1000, timeframe="1h", start="2020-01-01")
+        # Remove 10 consecutive candles -> one 11-unit gap; ~1% aggregate.
+        df_gap = df.drop(index=range(400, 410)).reset_index(drop=True)
+
+        report = validator.validate_timeframe(
+            df_gap,
+            "1h",
+            start_date="2020-01-01",
+            end_date="2020-02-10",  # last ts is 2020-02-11 15:00 >= this@23:00
+            raise_on_failure=True,  # must NOT raise despite the big gap
+        )
+        assert report.passed  # not aborted
+        assert report.gap_ratio < 0.05  # aggregate still under the hard gate
+        # single-gap recorded as a WARNING, not a hard failure
+        assert "no_excessive_single_gap" in {w.name for w in report.warnings}
+        assert "no_excessive_single_gap" not in {c.name for c in report.failed_checks}
+        assert "[WARN] no_excessive_single_gap" in report.summary()
+
+    def test_excessive_aggregate_gap_still_hard_fails(self, validator) -> None:
+        """The 5% aggregate gap_ratio remains a HARD gate (unchanged)."""
+        df = _make_clean_df(n=100, timeframe="1h", start="2020-01-01")
+        # Drop 20% of candles -> aggregate gap ratio > 5% -> hard fail.
+        df_gap = df.drop(index=range(40, 60)).reset_index(drop=True)
+        report = validator.validate_timeframe(
+            df_gap, "1h", start_date="2020-01-01", end_date="2020-01-01",
+            raise_on_failure=False,
+        )
+        assert not report.passed
+        assert "gap_ratio_within_tolerance" in {c.name for c in report.failed_checks}
 
 
 # --- ValidationReport ------------------------------------------------------------------

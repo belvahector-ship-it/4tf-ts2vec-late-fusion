@@ -290,6 +290,55 @@ class TestDownloadWithMockedExchange:
         assert list(df.columns) == list(RAW_COLUMNS)
         assert df["timestamp"].is_monotonic_increasing
 
+    def test_download_trims_candles_past_end_date(
+        self, downloader: BinanceDownloader
+    ) -> None:
+        """
+        Regression test for the M1 end-date overshoot bug (found on the
+        first real Binance run, 2026-07-03): Binance pages append whole
+        1000-candle blocks and the final page overshoots the study end,
+        which earlier code never trimmed. A mock returning daily candles
+        that run PAST the requested end must be trimmed to [start, end].
+        """
+        # 40 daily candles from 2020-01-01, i.e. through 2020-02-09,
+        # but we only request through 2020-01-31 -> 9 must be dropped.
+        day_ms = 86_400_000
+        start_ms = 1577836800000  # 2020-01-01 00:00 UTC
+        mock_candles = [
+            [start_ms + i * day_ms, 100.0, 101.0, 99.0, 100.5, 10.0]
+            for i in range(40)
+        ]
+        mock_exchange = MagicMock()
+        mock_exchange.fetch_ohlcv.return_value = mock_candles
+
+        with patch.object(downloader, "_get_exchange", return_value=mock_exchange):
+            df = downloader.download("1d", "2020-01-01", "2020-01-31")
+
+        end = pd.Timestamp("2020-01-31 23:59:59", tz="UTC")
+        assert df["timestamp"].max() <= end
+        assert (df["timestamp"] > end).sum() == 0
+        # Jan 2020 has 31 daily candles within [2020-01-01, 2020-01-31].
+        assert len(df) == 31
+
+    def test_download_trims_candles_before_start_date(
+        self, downloader: BinanceDownloader
+    ) -> None:
+        """Symmetric guard: candles before `start` are also excluded."""
+        day_ms = 86_400_000
+        # Mock starts 5 days BEFORE the requested start.
+        start_ms = 1577836800000  # 2020-01-01
+        mock_candles = [
+            [start_ms - 5 * day_ms + i * day_ms, 100.0, 101.0, 99.0, 100.5, 10.0]
+            for i in range(10)
+        ]
+        mock_exchange = MagicMock()
+        mock_exchange.fetch_ohlcv.return_value = mock_candles
+
+        with patch.object(downloader, "_get_exchange", return_value=mock_exchange):
+            df = downloader.download("1d", "2020-01-01", "2020-01-31")
+
+        assert df["timestamp"].min() >= pd.Timestamp("2020-01-01", tz="UTC")
+
     def test_retries_on_network_error_then_succeeds(
         self, downloader: BinanceDownloader
     ) -> None:

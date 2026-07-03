@@ -410,6 +410,64 @@ class TestVerifyNoLookahead:
             verify_no_lookahead(master, small_multi_tf_dfs["1h"], "1h")
 
 
+# --- ADR-023: outage-gap reindex to a complete hourly grid ---------------------------
+
+class TestOutageGapReindex:
+    """
+    ADR-023 regression: real exchange outages leave holes in the 1h/15m
+    anchor. M3 must reindex to a complete hourly grid, forward-fill prices
+    (no look-ahead), and set volume=0 for the outage hours — preserving
+    the full temporal structure the downstream LC-4 counts depend on.
+    """
+
+    def _dfs_with_hole(self, hole: pd.Timestamp) -> dict[str, pd.DataFrame]:
+        ts_1h = pd.date_range("2020-01-01 00:00", periods=48, freq="1h", tz="UTC")
+        ts_15m = pd.date_range("2020-01-01 00:00", periods=192, freq="15min", tz="UTC")
+        ts_4h = pd.date_range("2020-01-01 00:00", periods=12, freq="4h", tz="UTC")
+        ts_1d = pd.date_range("2020-01-01 00:00", periods=2, freq="1D", tz="UTC")
+        df_1h = _make_ohlcv(ts_1h, base_price=1000.0)
+        df_15m = _make_ohlcv(ts_15m, base_price=100.0)
+        df_4h = _make_ohlcv(ts_4h, base_price=5000.0)
+        df_1d = _make_ohlcv(ts_1d, base_price=20000.0)
+        # Punch a 1-hour hole in the 1h anchor and its four 15m candles.
+        df_1h = df_1h[df_1h["timestamp"] != hole].reset_index(drop=True)
+        df_15m = df_15m[df_15m["timestamp"].dt.floor("1h") != hole].reset_index(
+            drop=True
+        )
+        return {"1h": df_1h, "15m": df_15m, "4h": df_4h, "1d": df_1d}
+
+    def test_hole_is_reindexed_and_grid_complete(self, aligner) -> None:
+        from src.data.alignment import verify_grid_completeness
+
+        hole = pd.Timestamp("2020-01-01 10:00", tz="UTC")
+        master = aligner.build_master(self._dfs_with_hole(hole))
+        assert len(master) == 48  # hole reindexed back into the grid
+        ok, detail = verify_grid_completeness(master)
+        assert ok, detail
+
+    def test_price_locf_and_volume_zero_at_outage_hour(self, aligner) -> None:
+        hole = pd.Timestamp("2020-01-01 10:00", tz="UTC")
+        prev = pd.Timestamp("2020-01-01 09:00", tz="UTC")
+        master = aligner.build_master(self._dfs_with_hole(hole))
+        row = master.loc[master["timestamp"] == hole]
+        prev_row = master.loc[master["timestamp"] == prev]
+        assert not row.empty
+        # price O/H/L/C are last-observation-carried-forward from hour 9
+        for field in ("open", "high", "low", "close"):
+            assert row[f"{field}_1h"].iloc[0] == prev_row[f"{field}_1h"].iloc[0]
+        # volume is 0 for the outage hour (1h anchor AND 15m aggregate)
+        assert row["volume_1h"].iloc[0] == 0.0
+        assert row["volume_15m"].iloc[0] == 0.0
+
+    def test_end_to_end_passes_with_hole(self) -> None:
+        hole = pd.Timestamp("2020-01-01 10:00", tz="UTC")
+        # expected_rows=None: this synthetic set is 48h, not the real 35,064.
+        master, results = build_and_verify_master(
+            self._dfs_with_hole(hole), raise_on_failure=True, expected_rows=None
+        )
+        assert all(r.passed for r in results)  # V-LEAK-001 still holds
+
+
 # --- build_and_verify_master (end-to-end M3 orchestration) ---------------------------
 
 class TestBuildAndVerifyMaster:

@@ -185,6 +185,27 @@ class TestVolumeZscore:
     def test_default_window_is_20(self) -> None:
         assert VOLUME_ZSCORE_WINDOW == 20
 
+    def test_constant_volume_window_yields_zero_not_nan(self, engineer) -> None:
+        """
+        Regression (2026-07-03, real-data run): a zero-variance rolling
+        window (constant forward-filled 1d volume within a day) must give
+        z-score 0, NOT NaN. Without the epsilon guard this dropped ~7,324
+        rows and broke the LC-4-audited 35,045-row count.
+        """
+        # 40 identical volumes -> every full 20-window has std == 0.
+        df = pd.DataFrame({"volume_1d": [7.0] * 40})
+        result = engineer.compute_volume_zscore(df, "1d", window=20)
+        valid = result.iloc[19:]  # rows with a full window
+        assert not valid.isna().any()
+        assert np.allclose(valid.to_numpy(), 0.0)
+
+    def test_partly_constant_then_varying_no_nan(self, engineer) -> None:
+        """Mixed constant/varying volumes must never produce NaN post-warmup."""
+        vols = [5.0] * 25 + [float(v) for v in range(1, 16)]
+        df = pd.DataFrame({"volume_4h": vols})
+        result = engineer.compute_volume_zscore(df, "4h", window=20)
+        assert not result.iloc[19:].isna().any()
+
 
 # --- compute_features_for_timeframe / compute_all_features -------------------
 

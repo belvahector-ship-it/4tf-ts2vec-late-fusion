@@ -69,6 +69,10 @@ FEATURE_NAMES: tuple[str, ...] = (
 
 VOLUME_ZSCORE_WINDOW: int = 20
 BODY_RATIO_EPSILON: float = 1e-8
+# Guards volume_zscore against a zero-variance rolling window (std==0),
+# which occurs for forward-filled 1d volume within a single day. Mirrors
+# BODY_RATIO_EPSILON (ADR-015). See compute_volume_zscore.
+VOLUME_ZSCORE_EPSILON: float = 1e-8
 
 # Expected output schema per DS-02 v1.1 Stage 3 / DS-04 v1.1 V-DATA-004.
 EXPECTED_FEATURE_COLUMNS: int = 1 + len(FEATURE_NAMES) * len(TIMEFRAME_SUFFIXES)  # 29
@@ -162,7 +166,14 @@ class FeatureEngineer:
         volume = df[f"volume_{suffix}"]
         rolling_mean = volume.rolling(window=window, min_periods=window).mean()
         rolling_std = volume.rolling(window=window, min_periods=window).std()
-        return (volume - rolling_mean) / rolling_std
+        # Epsilon guards against a zero-variance window (rolling_std == 0),
+        # which occurs whenever the forward-filled 1d volume is constant
+        # across a whole 20-hour window (every window lying inside one day).
+        # Without it, (0 - 0) / 0 = NaN would drop ~5 rows/day (~7,324 total)
+        # and shatter the LC-4-audited 35,045-row count. With it, a
+        # no-variation window correctly yields z-score 0 — the same
+        # division-by-zero-guard pattern already used by body_ratio (ADR-015).
+        return (volume - rolling_mean) / (rolling_std + VOLUME_ZSCORE_EPSILON)
 
     def compute_hl_range(self, df: pd.DataFrame, suffix: str) -> pd.Series:
         """hl_range = (high_t - low_t) / open_t."""

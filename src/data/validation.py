@@ -57,11 +57,27 @@ class DataValidationError(RuntimeError):
 
 @dataclass
 class CheckResult:
-    """Result of a single validation check."""
+    """
+    Result of a single validation check.
+
+    Attributes
+    ----------
+    name, passed, detail
+        Check identity, pass/fail, and an optional human-readable detail.
+    severity : {"error", "warning"}
+        "error" (default) — a failure aborts the pipeline (hard gate).
+        "warning" — a failure is logged and recorded for audit but does
+        NOT abort. Used for `no_excessive_single_gap` (ADR-022): real
+        exchange downtime (e.g. the 2020-02-19 ~6h Binance outage) is a
+        legitimate market condition, not a data-quality defect, so a
+        single large gap is surfaced but not fatal — the aggregate
+        `gap_ratio` (5%) remains the hard data-quality gate.
+    """
 
     name: str
     passed: bool
     detail: str = ""
+    severity: str = "error"
 
 
 @dataclass
@@ -85,13 +101,24 @@ class ValidationReport:
 
     @property
     def passed(self) -> bool:
-        """True if every check in this report passed."""
-        return all(c.passed for c in self.checks)
+        """
+        True if every ERROR-severity check passed.
+
+        Warning-severity checks (e.g. `no_excessive_single_gap`, ADR-022)
+        that fail are recorded and logged but do NOT flip this to False —
+        they are not hard gates.
+        """
+        return all(c.passed for c in self.checks if c.severity == "error")
 
     @property
     def failed_checks(self) -> list[CheckResult]:
-        """The subset of checks that failed."""
-        return [c for c in self.checks if not c.passed]
+        """Error-severity checks that failed (the ones that abort)."""
+        return [c for c in self.checks if not c.passed and c.severity == "error"]
+
+    @property
+    def warnings(self) -> list[CheckResult]:
+        """Warning-severity checks that failed (recorded, non-fatal)."""
+        return [c for c in self.checks if not c.passed and c.severity == "warning"]
 
     def summary(self) -> str:
         """
@@ -105,7 +132,10 @@ class ValidationReport:
         """
         lines = [f"Validation report for timeframe='{self.timeframe}':"]
         for check in self.checks:
-            status = "PASS" if check.passed else "FAIL"
+            if check.passed:
+                status = "PASS"
+            else:
+                status = "WARN" if check.severity == "warning" else "FAIL"
             line = f"  [{status}] {check.name}"
             if check.detail:
                 line += f" — {check.detail}"
@@ -226,10 +256,18 @@ class DataValidator:
         return str(dtype.tz) == "UTC"
 
     def check_date_coverage(
-        self, df: pd.DataFrame, start: str, end: str
+        self, df: pd.DataFrame, start: str, end: str, timeframe: str = "1h"
     ) -> bool:
         """
         Verify the data covers the full required study period.
+
+        The required LAST candle is timeframe-aware: candles are labeled
+        by open time, so the final candle whose period lies within the
+        study end day is `(end + 1 day) - candle_duration`. For 1h this
+        is 23:00, but for 4h it is 20:00 and for 1d it is 00:00 — a fixed
+        23:00 boundary would wrongly reject correctly-covered 4h/1d data
+        (bug found on the first real-data run; see ADR-022 / DS-04
+        V-DATA-001 amendment 2026-07-03).
 
         Parameters
         ----------
@@ -239,22 +277,25 @@ class DataValidator:
             Study start date "YYYY-MM-DD" — first timestamp must be
             ≤ this date at 00:00 UTC.
         end : str
-            Study end date "YYYY-MM-DD" — last timestamp must be
-            ≥ this date at 23:00 UTC (per DS-02 Stage 1 table).
+            Study end date "YYYY-MM-DD" — last timestamp must be ≥ the
+            last candle of this date for the given timeframe.
+        timeframe : str, optional
+            One of "15m", "1h" (default), "4h", "1d"; sets the expected
+            last-candle open time on the end date.
 
         Returns
         -------
         bool
-            True if first timestamp ≤ start and last timestamp ≥ end
-            (with end interpreted as 23:00 UTC on that date).
+            True if first timestamp ≤ start@00:00 and last timestamp ≥
+            the timeframe's last expected candle on the end date.
         """
         start_dt = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        end_dt = datetime.strptime(end, "%Y-%m-%d").replace(
-            tzinfo=timezone.utc, hour=23, minute=0, second=0
-        )
+        end_day = datetime.strptime(end, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        duration = TIMEFRAME_DURATIONS[timeframe].to_pytimedelta()
+        last_expected = end_day + timedelta(days=1) - duration
         first_ts = df["timestamp"].iloc[0].to_pydatetime()
         last_ts = df["timestamp"].iloc[-1].to_pydatetime()
-        return first_ts <= start_dt and last_ts >= end_dt
+        return first_ts <= start_dt and last_ts >= last_expected
 
     def check_gap_ratio(self, df: pd.DataFrame, timeframe: str) -> float:
         """
@@ -336,12 +377,18 @@ class DataValidator:
             candle duration (i.e., at most one missing candle between
             any two consecutive observed timestamps).
         """
+        return self.max_single_gap_units(df, timeframe) <= 2.0
+
+    def max_single_gap_units(self, df: pd.DataFrame, timeframe: str) -> float:
+        """
+        Return the largest gap between consecutive candles, in units of
+        the expected candle duration (1.0 = perfectly spaced).
+        """
         duration = TIMEFRAME_DURATIONS[timeframe]
         deltas = df["timestamp"].diff().dropna()
         if len(deltas) == 0:
-            return True
-        max_gap_in_units = (deltas / duration).max()
-        return bool(max_gap_in_units <= 2.0)
+            return 1.0
+        return float((deltas / duration).max())
 
     def validate_timeframe(
         self,
@@ -421,9 +468,9 @@ class DataValidator:
         report.checks.append(
             CheckResult(
                 "date_range_coverage",
-                self.check_date_coverage(df, start_date, end_date),
-                detail=f"expected [{start_date}, {end_date}], "
-                f"got [{df['timestamp'].iloc[0]}, {df['timestamp'].iloc[-1]}]",
+                self.check_date_coverage(df, start_date, end_date, timeframe),
+                detail=f"expected [{start_date}, {end_date}] (timeframe-aware last "
+                f"candle), got [{df['timestamp'].iloc[0]}, {df['timestamp'].iloc[-1]}]",
             )
         )
 
@@ -436,21 +483,50 @@ class DataValidator:
                 detail=f"gap_ratio={gap_ratio:.4%}, tolerance={GAP_RATIO_TOLERANCE:.0%}",
             )
         )
+        # ADR-022: `no_excessive_single_gap` is a WARNING, not a hard gate.
+        # A single large gap almost always reflects real exchange downtime
+        # (e.g. the 2020-02-19 ~6h Binance outage), which is a legitimate
+        # market condition rather than a data-quality defect. The aggregate
+        # `gap_ratio` (5%) above remains the hard data-quality gate; here we
+        # surface and log the largest gap for audit without aborting.
+        max_gap_units = self.max_single_gap_units(df, timeframe)
+        single_gap_ok = max_gap_units <= 2.0
         report.checks.append(
             CheckResult(
                 "no_excessive_single_gap",
-                self.check_max_single_gap(df, timeframe),
+                single_gap_ok,
+                detail=f"largest single gap = {max_gap_units:.1f} candle durations "
+                f"(threshold 2.0; WARNING-only per ADR-022)",
+                severity="warning",
             )
         )
+        if not single_gap_ok:
+            logger.warning(
+                "timeframe=%s has a single gap of %.1f candle durations "
+                "(> 2.0). Recorded as a WARNING, not a failure (ADR-022): "
+                "real exchange downtime is a legitimate market condition; "
+                "aggregate gap_ratio=%.4f%% remains the hard gate. M3 "
+                "forward-fill will reindex these to a complete 1h grid.",
+                timeframe,
+                max_gap_units,
+                gap_ratio * 100,
+            )
 
         if report.passed:
-            logger.info("Validation PASSED for timeframe=%s", timeframe)
+            if report.warnings:
+                logger.info(
+                    "Validation PASSED for timeframe=%s (with %d warning(s): %s)",
+                    timeframe,
+                    len(report.warnings),
+                    [w.name for w in report.warnings],
+                )
+            else:
+                logger.info("Validation PASSED for timeframe=%s", timeframe)
         else:
             logger.error(
-                "Validation FAILED for timeframe=%s: %d/%d checks failed",
+                "Validation FAILED for timeframe=%s: %d error-check(s) failed",
                 timeframe,
                 len(report.failed_checks),
-                len(report.checks),
             )
             if raise_on_failure:
                 raise DataValidationError(report.summary())
