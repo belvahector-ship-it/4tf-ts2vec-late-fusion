@@ -29,7 +29,12 @@ torch==2.3.1
 git+https://github.com/zhihanyue/ts2vec.git@b0088e14a99706c05451316dc6db8d3da9351163#egg=ts2vec
 
 # --- Clustering -----------------------------------------------------------
-hdbscan==0.8.38.post1
+# NOTE (2026-07-03, session 9): bumped 0.8.38.post1 -> 0.8.40. The pinned
+# 0.8.38.post1 ships no cp311/Windows wheel (would require MSVC to compile),
+# whereas 0.8.40 has a prebuilt wheel AND keeps scikit-learn==1.5.0 pinned
+# (0.8.44 was rejected because it forces scikit-learn 1.9.0). Same maintainer,
+# same approximate_predict API. See docs/CHECKPOINT_LATEST.md Item Terbuka #3.
+hdbscan==0.8.40
 
 # --- External baselines (M10.5) -----------------------------------------------
 hmmlearn==0.3.2

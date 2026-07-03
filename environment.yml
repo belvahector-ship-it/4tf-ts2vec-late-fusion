@@ -34,7 +34,7 @@ dependencies:
   - pip:
       # Status: Pinned — see requirements.txt / configs/base.yaml for provenance
       - git+https://github.com/zhihanyue/ts2vec.git@b0088e14a99706c05451316dc6db8d3da9351163#egg=ts2vec
-      - hdbscan==0.8.38.post1
+      - hdbscan==0.8.40  # bumped from 0.8.38.post1 (no cp311 wheel); see requirements.txt note
       - hmmlearn==0.3.2
       - ccxt==4.3.41
       - statsmodels==0.14.2
