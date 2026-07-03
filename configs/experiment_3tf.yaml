@@ -1,0 +1,12 @@
+# configs/experiment_3tf.yaml
+#
+# Condition: 3TF — evaluates the effect of adding a mid-scale resolution
+# (4h) on top of the 2TF condition (DS-03 Table 3.10).
+
+condition:
+  name: "3TF"
+  active_timeframes: ["15m", "1h", "4h"]
+  role: "primary_cumulative"
+  description: >
+    Evaluates the effect of adding the 4h branch on top of {15m, 1h}.
+    Compared against 1TF (pre-registered primary comparison #2).

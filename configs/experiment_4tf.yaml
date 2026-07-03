@@ -1,0 +1,12 @@
+# configs/experiment_4tf.yaml
+#
+# Condition: 4TF — full multi-resolution condition, all four timeframes
+# active (DS-03 Table 3.10).
+
+condition:
+  name: "4TF"
+  active_timeframes: ["15m", "1h", "4h", "1d"]
+  role: "primary_cumulative"
+  description: >
+    Full multi-resolution condition. All four branches active.
+    Compared against 1TF (pre-registered primary comparison #3).

@@ -1,0 +1,125 @@
+# configs/base.yaml
+#
+# Base configuration containing every controlled variable from
+# DS-03 Table 3.11 (Controlled Variables). This file is the single
+# source of truth for all hyperparameters shared across every
+# experimental condition (INV-001: only `condition.active_timeframes`
+# may differ between conditions — everything below must stay identical).
+#
+# No source file in src/ may hardcode any of these values. If a value
+# needs to change, it changes here, and the change is a documented
+# deviation from DS-03 (see IMP-01 Development Philosophy).
+#
+# Schema is validated by src/utils/config.py::REQUIRED_BASE_FIELDS.
+
+# --- Encoder: TS2Vec (DS-03 Table 3.6) --------------------------------------
+encoder:
+  architecture: "ts2vec"
+  input_dim: 7            # 7 OHLCV-derived features (DS-03 §3, no technical indicators)
+  hidden_dim: 64
+  output_dim: 64
+  depth: 10                # dilated CNN layers
+  kernel_size: 3
+  mask_ratio: 0.5           # TS2Vec default
+
+# --- Fusion: late concatenation + fixed random projection (DS-03 §3.5) -----
+fusion:
+  output_dim: 256
+  projection_seed: 42
+  concat_order: ["15m", "1h", "4h", "1d"]   # fixed order, INV-003 / ADR-003
+
+# --- Window generation (DS-02 Stage 5, DS-03 Table 3.11) -------------------
+window:
+  size: 48
+  stride: 1
+  n_features: 7
+  normalization: "per_window_zscore"        # INV-006 / V-LEAK-004
+
+# --- Training protocol (DS-03 Table 3.6 / 3.11) -----------------------------
+training:
+  optimizer: "AdamW"
+  learning_rate: 0.001      # 1e-3
+  weight_decay: 0.0001      # 1e-4
+  batch_size: 8
+  max_epochs: 50
+  early_stopping_patience: 10
+
+# --- Clustering: HDBSCAN (DS-03 Table 3.9) ----------------------------------
+clustering:
+  algorithm: "hdbscan"
+  distance_metric: "euclidean"
+  min_cluster_size_grid: [50, 100, 200]
+  min_samples_grid: [5, 10, 20]
+  max_clusters: 8            # interpretability constraint
+  min_clusters: 2
+  grid_search_condition: "1TF"   # Stage 1 grid search runs ONLY on 1TF (locked, then reused)
+
+# --- Dataset (DS-03 §1.7, Table 3.11) ---------------------------------------
+dataset:
+  symbol: "BTC/USDT"
+  exchange: "binance"
+  start_date: "2020-01-01"
+  end_date: "2023-12-31"
+  timezone: "UTC"
+  anchor_timeframe: "1h"     # all other timeframes aligned to this anchor (DS-02 Stage 2)
+  timeframes: ["15m", "1h", "4h", "1d"]
+  train_test_split: "walk_forward"
+  test_start_date: "2023-01-01"   # per DS-04 V-LEAK-003 note (up to 47 overlapping windows expected)
+
+# --- Reproducibility: five seeds applied identically to every RNG source ---
+# (Python, NumPy, PyTorch, CUDA) — DS-03 Table 3.11, INV-007.
+seeds: [42, 123, 456, 789, 1024]
+
+# --- Statistical testing protocol (DS-03 §3.8, pre-registered) -------------
+statistics:
+  primary_comparisons:
+    - {condition: "2TF", baseline: "1TF"}
+    - {condition: "3TF", baseline: "1TF"}
+    - {condition: "4TF", baseline: "1TF"}
+  test: "wilcoxon_signed_rank"
+  alternative: "greater"          # one-sided (H1: multi-TF > 1TF)
+  correction: "holm_bonferroni"
+  significance_threshold: 0.05
+  economic_validity_test: "kruskal_wallis"
+
+# --- External baselines (DS-03 §4, IMP-01 v1.1 M10.5) -----------------------
+external_baselines:
+  hmm:
+    n_components_grid: [2, 3, 4]
+    selection_criterion: "bic"
+    input_timeframe: "1h"
+  km_pca:
+    k_grid: [2, 3, 4, 5, 6]
+    pca_components: 10
+    selection_criterion: "silhouette"
+    input_timeframe: "1h"
+
+# --- TS2Vec upstream pin (ADR-001) ------------------------------------------
+# Exact commit hash must also appear in requirements.txt and every
+# checkpoint's reproducibility bundle (ADR-010).
+#
+# DEPENDENCY PINNING STATUS: Confirmed (2026-07-03)
+#   Repository:   https://github.com/zhihanyue/ts2vec
+#   Branch:       main
+#   Commit Hash:  b0088e14a99706c05451316dc6db8d3da9351163
+#   Status:       Pinned
+#
+# NOTE: this commit hash was provided directly by the author from a
+# local clone/zip of the repository (2026-07-03). It does NOT match
+# the current `main` branch HEAD at time of writing
+# (ac76ac278b564e81010cf07d14d4109e9d202ead, confirmed via GitHub page
+# metadata) — this is expected if the author's clone predates later
+# upstream commits, or pins a specific known-good commit. Source code
+# inspection (ts2vec.py, models/encoder.py, models/dilated_conv.py,
+# models/losses.py, utils.py) confirms the author-provided zip's
+# content is textually identical to the current main branch's
+# ts2vec.py as of this writing, so no functional discrepancy is known.
+# If a future `pip install` at this exact hash fails (e.g. because the
+# commit was later removed via force-push/rebase on the upstream repo),
+# fall back to the fork at ts2vec.fallback_fork below, or re-verify
+# with `git log --all | grep b0088e14`.
+ts2vec:
+  repository: "https://github.com/zhihanyue/ts2vec"
+  branch: "main"
+  pinned_commit: "b0088e14a99706c05451316dc6db8d3da9351163"
+  fallback_fork: "REPLACE_WITH_FALLBACK_FORK_URL"     # TODO (per author's plan): create after Milestone 1

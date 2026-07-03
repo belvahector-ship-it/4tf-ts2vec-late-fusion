@@ -1,0 +1,14 @@
+# configs/experiment_1tf.yaml
+#
+# Condition: 1TF — Primary baseline (DS-03 Table 3.10).
+# Identical to secondary baseline BL-1h; not double-counted (PROPOSAL §3.6).
+# Per INV-001, only `condition.active_timeframes` differs from base.yaml.
+
+condition:
+  name: "1TF"
+  active_timeframes: ["1h"]
+  role: "primary_baseline"
+  description: >
+    Single-resolution baseline (1h only). All multi-resolution
+    conditions (2TF, 3TF, 4TF) are compared against this condition via
+    the pre-registered Wilcoxon signed-rank tests (DS-03 §3.8).

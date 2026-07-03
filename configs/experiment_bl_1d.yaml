@@ -1,0 +1,13 @@
+# configs/experiment_bl_1d.yaml
+#
+# Secondary baseline: BL-1d — isolates the 1d branch's individual
+# contribution (DS-03 §3.6, "Secondary Baselines" table). Not part of
+# the pre-registered primary comparisons; reported separately.
+
+condition:
+  name: "BL-1d"
+  active_timeframes: ["1d"]
+  role: "secondary_baseline"
+  description: >
+    Single-resolution baseline (1d only). Isolates the 1d branch's
+    individual contribution. Not used for primary hypothesis testing.

@@ -1,0 +1,28 @@
+# configs/baseline_kmpca.yaml
+#
+# External baseline: K-Means + PCA (DS-03 §4 "External Baselines",
+# IMP-01 v1.1 M10.5). Run under the identical five-seed protocol as the
+# 7 TS2Vec conditions, on the same 1h-resolution, 7-feature input used
+# by the 1TF/BL-1h condition. Does NOT use TS2Vec, branch encoders, or
+# the fusion module — see M10.5 for the independent implementation.
+
+baseline:
+  name: "KM-PCA"
+  method: "kmeans_pca"
+  input_timeframe: "1h"
+  input_features: 7
+  pca_components: 10
+  k_grid: [2, 3, 4, 5, 6]
+  selection_criterion: "silhouette"
+  seeds: [42, 123, 456, 789, 1024]
+  dataset:
+    symbol: "BTC/USDT"
+    exchange: "binance"
+    start_date: "2020-01-01"
+    end_date: "2023-12-31"
+    train_test_split: "walk_forward"
+    test_start_date: "2023-01-01"
+
+condition:
+  name: "KM-PCA"
+  active_timeframes: ["1h"]

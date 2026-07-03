@@ -1,0 +1,13 @@
+# configs/experiment_bl_15m.yaml
+#
+# Secondary baseline: BL-15m — isolates the 15m branch's individual
+# contribution (DS-03 §3.6, "Secondary Baselines" table). Not part of
+# the pre-registered primary comparisons; reported separately.
+
+condition:
+  name: "BL-15m"
+  active_timeframes: ["15m"]
+  role: "secondary_baseline"
+  description: >
+    Single-resolution baseline (15m only). Isolates the 15m branch's
+    individual contribution. Not used for primary hypothesis testing.

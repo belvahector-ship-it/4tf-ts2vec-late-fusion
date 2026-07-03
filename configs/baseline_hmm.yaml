@@ -1,0 +1,31 @@
+# configs/baseline_hmm.yaml
+#
+# External baseline: Hidden Markov Model (DS-03 §4 "External Baselines",
+# IMP-01 v1.1 M10.5). Run under the identical five-seed protocol as the
+# 7 TS2Vec conditions, on the same 1h-resolution, 7-feature input used
+# by the 1TF/BL-1h condition. Does NOT use TS2Vec, branch encoders, or
+# the fusion module — see M10.5 for the independent implementation.
+#
+# Note: this config intentionally does NOT carry the full base.yaml
+# schema (no encoder.*, fusion.*, window.* needed). It is validated
+# against a reduced required-field set in src/utils/config.py.
+
+baseline:
+  name: "HMM"
+  method: "hidden_markov_model"
+  input_timeframe: "1h"
+  input_features: 7          # same 7 OHLCV-derived features, no technical indicators
+  n_components_grid: [2, 3, 4]
+  selection_criterion: "bic"
+  seeds: [42, 123, 456, 789, 1024]
+  dataset:
+    symbol: "BTC/USDT"
+    exchange: "binance"
+    start_date: "2020-01-01"
+    end_date: "2023-12-31"
+    train_test_split: "walk_forward"
+    test_start_date: "2023-01-01"
+
+condition:
+  name: "HMM"
+  active_timeframes: ["1h"]

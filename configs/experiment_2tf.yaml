@@ -1,0 +1,12 @@
+# configs/experiment_2tf.yaml
+#
+# Condition: 2TF — evaluates the effect of adding a granular resolution
+# (15m) on top of the 1h baseline (DS-03 Table 3.10).
+
+condition:
+  name: "2TF"
+  active_timeframes: ["15m", "1h"]
+  role: "primary_cumulative"
+  description: >
+    Evaluates the effect of adding the 15m branch to the 1h baseline.
+    Compared against 1TF (pre-registered primary comparison #1).

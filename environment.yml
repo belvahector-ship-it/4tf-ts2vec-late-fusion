@@ -1,0 +1,41 @@
+# environment.yml
+#
+# Conda environment specification, consistent with requirements.txt
+# (IMP-01 M0 Definition of Done: "environment.yml and requirements.txt
+# are consistent and tested on a clean install").
+#
+# Usage:
+#   conda env create -f environment.yml
+#   conda activate market-state-discovery
+#
+# IMPORTANT: same pinned-commit caveat as requirements.txt applies to
+# the TS2Vec pip dependency below (see ADR-001).
+
+name: market-state-discovery
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.11
+  - pip
+  - numpy=1.26.4
+  - pandas=2.2.2
+  - scipy=1.13.1
+  - scikit-learn=1.5.0
+  - pyyaml=6.0.1
+  - pytorch=2.3.1
+  - cpuonly  # remove this line and install the appropriate pytorch-cuda build for GPU use
+  - pyarrow=16.1.0
+  - matplotlib=3.9.0
+  - pytest=8.2.2
+  - pytest-cov=5.0.0
+  - pip:
+      # Status: Pinned — see requirements.txt / configs/base.yaml for provenance
+      - git+https://github.com/zhihanyue/ts2vec.git@b0088e14a99706c05451316dc6db8d3da9351163#egg=ts2vec
+      - hdbscan==0.8.38.post1
+      - hmmlearn==0.3.2
+      - ccxt==4.3.41
+      - statsmodels==0.14.2
+      - umap-learn==0.5.6

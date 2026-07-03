@@ -1,0 +1,13 @@
+# configs/experiment_bl_4h.yaml
+#
+# Secondary baseline: BL-4h — isolates the 4h branch's individual
+# contribution (DS-03 §3.6, "Secondary Baselines" table). Not part of
+# the pre-registered primary comparisons; reported separately.
+
+condition:
+  name: "BL-4h"
+  active_timeframes: ["4h"]
+  role: "secondary_baseline"
+  description: >
+    Single-resolution baseline (4h only). Isolates the 4h branch's
+    individual contribution. Not used for primary hypothesis testing.
