@@ -295,7 +295,15 @@ class TestRunTemporalSplit:
 
     def test_no_shuffling_train_is_sorted(self) -> None:
         """DS-02 v1.1: 'No shuffling. No stratification. No overlap.'"""
-        df = _make_features_df("2020-01-01 19:00:00", 1000)
+        # Fixture must straddle the ADR-014 boundary (2022-12-31 23:00 ->
+        # 2023-01-01 00:00): run_temporal_split always enforces
+        # check_split_boundary (train-max exact + non-empty test), which
+        # expected_train_rows/expected_test_rows=None does NOT disable.
+        # Data starting 2022-12-01 for 1000 hourly rows spans into 2023,
+        # so the split is valid and this test can isolate its actual intent
+        # (train timestamps are monotonic / not shuffled). See sibling
+        # test_does_not_raise_when_size_check_disabled for the same pattern.
+        df = _make_features_df("2022-12-01 00:00:00", 1000)
         result = run_temporal_split(
             df, raise_on_failure=True, expected_train_rows=None, expected_test_rows=None
         )
