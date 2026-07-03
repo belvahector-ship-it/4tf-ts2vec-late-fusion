@@ -179,3 +179,14 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+
+# Project data & run artifacts (large / regenerable — never commit)
+# See IMP-01 M0: data/, checkpoints/, outputs/, experiments/, logs/ are
+# excluded from version control; regenerate via the pipeline scripts.
+data/
+checkpoints/
+outputs/
+experiments/
+logs/
+# Temporary transfer archives (e.g. window_data.rar for Kaggle uploads)
+*.rar
