@@ -34,10 +34,12 @@ diperbaiki.
 3. **Baca `docs/IMP-01_v1.3.md`** (roadmap implementasi, versi
    terbaru) untuk spesifikasi modul M7 dan seterusnya. **Jangan pakai
    versi IMP-01 lain jika ada di histori — v1.3 adalah yang final.**
-4. Cek versi dokumen desain yang dipakai: **DS-01 v1.1, DS-02 v1.2,
+4. Cek versi dokumen desain yang dipakai: **DS-01 v1.2, DS-02 v1.2,
    DS-03 v1.2, DS-04 v1.1, IMP-01 v1.3**. Kalau ada nama file dengan
    angka versi lebih rendah tercecer di suatu tempat, itu bukan
-   sumber kebenaran — pakai yang disebut di sini.
+   sumber kebenaran — pakai yang disebut di sini. *(DS-01 di-bump
+   v1.1 → v1.2 saat konsolidasi ADR-021/022/023/024 ke ADR Index;
+   isi ADR-001–020 tidak berubah.)*
 
 ## Yang BENAR-BENAR sudah selesai (M0–M6)
 

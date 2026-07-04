@@ -1,7 +1,7 @@
 # Multi-Resolution Temporal Representation Learning for Self-Supervised Cryptocurrency Market State Discovery
 
 > **Status:** Implementation in progress — **Milestone 2 (Data Pipeline Complete) achieved**: M1–M6 code complete (Data Acquisition, Data Validation, Temporal Alignment, Feature Engineering, Temporal Split, Window Generation). All V-LEAK-001 through V-LEAK-004 checkpoints implemented and verified. Next: M7 (TS2Vec Wrapper), blocked on TS2Vec commit hash (status: Pending).
-> **Design phase:** Complete. See `docs/` for PROPOSAL, DS-01 v1.1 through DS-04 v1.1, and IMP-01 v1.3.
+> **Design phase:** Complete. See `docs/` for PROPOSAL, DS-01 v1.2, DS-02 v1.2, DS-03 v1.2, DS-04 v1.1, and IMP-01 v1.3.
 
 ## Project Summary
 

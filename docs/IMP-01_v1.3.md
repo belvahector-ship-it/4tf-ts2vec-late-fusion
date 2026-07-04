@@ -5,7 +5,7 @@
 > **Status:** Draft — Pending Approval
 > **Date:** 2026-07
 > **Author:** Research Software Engineer (RSE)
-> **Depends on:** DS-01 v1.1, DS-02 v1.2, DS-03 v1.2, DS-04 v1.1
+> **Depends on:** DS-01 v1.2, DS-02 v1.2, DS-03 v1.2, DS-04 v1.1
 > **Does NOT modify:** Any research decision in DS-01 through DS-04
 
 > **Changelog v1.2 → v1.3 (structural design correction, no research decision changed):**
