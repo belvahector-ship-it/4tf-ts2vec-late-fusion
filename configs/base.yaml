@@ -90,6 +90,11 @@ external_baselines:
     input_timeframe: "1h"
   km_pca:
     k_grid: [2, 3, 4, 5, 6]
+    # CEILING / upper bound only — NOT the value used directly. The effective
+    # PCA n_components is computed at runtime as min(pca_components, n_features).
+    # For the 7-feature/1h input this clamps to 7 (full-rank whitening, not
+    # dimensionality reduction). PCA(10) on 7-dim data is mathematically
+    # impossible; see ADR-024 (docs/ADR-024_km_pca_component_clamp.md).
     pca_components: 10
     selection_criterion: "silhouette"
     input_timeframe: "1h"
