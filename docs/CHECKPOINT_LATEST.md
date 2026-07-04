@@ -190,28 +190,19 @@ Mapping kondisi→branch (DS-03 Table 3.10): 1TF=[1h]→64; 2TF=[15m,1h]→128; 
 
 **Catatan eksekusi:** `EmbeddingPipeline` butuh checkpoint branch (M8) untuk encode window real → embedding branch → fused. Baru 1 checkpoint real ada (1h/seed42). Menghasilkan 14 file fused/seed × 5 seed butuh 20 checkpoint M8 dulu (blocked oleh M8 full-run, lihat "Sisa yang belum dijalankan"). Logika fusi (inti M9) sudah teruji penuh dgn embedding sintetis + stub encoder.
 
-### M10.5 — External Baselines (HMM + KM-PCA) — **IN PROGRESS, BLOCKED (pending keputusan user)**
+### M10.5 — External Baselines (HMM + KM-PCA) — **SELESAI (kode + test + eksekusi real 10-run)**
 
-**Status: BELUM ADA KODE DITULIS.** Sesi ini baru sampai tahap baca-spec + verifikasi data + menemukan kontradiksi spec KM-PCA, lalu BERHENTI untuk tanya user (sesuai protokol). Tidak ada `src/models/external_baselines.py` atau test M10.5 yang dibuat. **Tidak ada kode yang mengasumsikan salah satu opsi KM-PCA.**
+**Keputusan KM-PCA: FINAL (Opsi 1, disetujui user via dokumen `EXTERNAL_BASELINE_PCA_UPDATE.md` + `PROMPT_CLAUDE_CODE_M10.5_PCA_DECISION.md`).** Kontradiksi `PCA(10)` vs 7 fitur 1h diselesaikan dengan **clamp `n_components = min(10, n_features) = 7`** → PCA full-rank (whitening/dekorelasi ortogonal, BUKAN reduksi dimensi), demi keadilan info vs kondisi 1TF/BL-1h. Difinalkan di **ADR-024** ([docs/ADR-024_km_pca_component_clamp.md](ADR-024_km_pca_component_clamp.md), standalone addendum). base.yaml `km_pca.pca_components: 10` kini diberi komentar eksplisit "ceiling, bukan nilai final".
 
-**Yang SUDAH dipahami/diverifikasi:**
-- Spec M10.5 dibaca lengkap (IMP-01 v1.3 baris 580–619 + DS-03 §4 baris 144–149 + base.yaml blok `external_baselines`).
-- Input dikonfirmasi dari data real M5: `train_features.parquet` (26,285 baris) / `test_features.parquet` (8,760 baris). Tepat **7 kolom fitur 1h**: `open_return_1h, high_return_1h, low_return_1h, close_return_1h, volume_zscore_1h, hl_range_1h, body_ratio_1h`. (Total 28 kolom fitur = 7×4 timeframe; M10.5 hanya pakai yang `_1h`.)
-- **HMM: TIDAK ambigu** — GaussianHMM (hmmlearn 0.3.2, sudah terinstall), `n_components ∈ {2,3,4}` pilih via **BIC** (`GaussianHMM.bic(X)` ada di 0.3.2), fit pada sequence train terurut waktu, predict state labels. Siap dikode begitu keputusan KM-PCA keluar (dikerjakan sekaligus supaya `ExternalBaselineRunner` yang menaungi keduanya tidak setengah jadi).
+**Kode:** [`src/models/external_baselines.py`](../src/models/external_baselines.py) — `HMMBaseline` (GaussianHMM, `covariance_type='diag'`, seleksi BIC atas `n_components∈{2,3,4}`), `KMeansPCABaseline` (PCA clamp→7, seleksi Silhouette atas `k∈{2,3,4,5,6}`, simpan explained-variance-ratio), `ExternalBaselineRunner` (10 run: 2 metode × 5 seed, tulis labels/model/selection-json). CLI: [`scripts/run_m10p5_baselines.py`](../scripts/run_m10p5_baselines.py). Sepenuhnya independen dari TS2Vec/M6/M7/M8/M9 (tak import satupun).
 
-**🚩 KONTRADIKSI SPEC KM-PCA (INI YANG DI-PENDING):**
-- Semua sumber bilang KM-PCA pakai **"7 features, 1h resolution"** (DS-03 §4 baris 149, base.yaml `km_pca.input_timeframe: 1h`, IMP-01 baris 607) **DAN** `PCA(n_components=10)` (base.yaml `km_pca.pca_components: 10`, DS-03 baris 149, IMP-01 baris 601/609).
-- **Mustahil secara matematis:** PCA maksimum menghasilkan `min(n_samples, n_features)=7` komponen. `PCA(n_components=10)` pada input 7-dim → `ValueError` di sklearn. Kemungkinan `pca_components=10` adalah sisa dari konteks berdimensi lebih tinggi.
-- **3 opsi yang sudah dianalisis (trade-off):**
-  1. **Pertahankan 7 fitur, PCA=min(10,7)=7** — full-rank rotation/whitening (tanpa reduksi dimensi) lalu KMeans. Paling konsisten dgn "7 features, 1h resolution". *Trade-off:* PCA jadi ~no-op (hanya dekorelasi), tapi tetap baseline valid & sebanding dgn 1TF/BL-1h.
-  2. **Pertahankan 7 fitur, PCA=5** — reduksi dimensi nyata (7→5). *Trade-off:* 5 angka BARU, tak ada di dokumen manapun (pilihan sepihak), butuh justifikasi.
-  3. **Pakai semua 28 fitur, PCA=10** — 28→10, `PCA(10)` jadi literal valid. *Trade-off:* KONTRADIKSI dgn "7 features, 1h resolution" di 3 tempat, DAN memberi KM-PCA lebih banyak info daripada baseline 1TF/BL-1h yang dibandingkan → bisa merusak keadilan perbandingan.
-- **Keputusan user:** DITUNDA. Kemungkinan perlu cek dokumen sumber (Sobreiro et al. / DS-03 asli) soal asal-usul angka PCA(10) sebelum final. **JANGAN diputuskan sepihak.**
+**Test:** [`tests/test_external_baselines.py`](../tests/test_external_baselines.py) — 12 test pakai **DATA REAL M5** (slice `_1h`, bukan synthetic). Full suite: **352 passed**. Menutup V-EXP-004 (10 run 5-seed), ADR-024 (test eksplisit: PCA efektif=7 bukan 10, tidak ada ValueError; + test yang membuktikan `PCA(10)` pada 7-dim memang error tanpa clamp), seleksi BIC/Silhouette, determinisme per-seed, label int M11-consumable.
 
-**MULAI DARI SINI di sesi berikutnya (jangan re-analisis dari nol):**
-1. Begitu user memutuskan opsi KM-PCA (1/2/3 atau lain), tulis `src/models/external_baselines.py`: `HMMBaseline` (fit_select via BIC / predict), `KMeansPCABaseline` (fit_select via Silhouette / predict — pakai keputusan PCA), `ExternalBaselineRunner` (orkestrasi 2 metode × 5 seed = 10 run, tulis output ke `experiments/{exp_id}/external_baselines/{hmm,kmpca}/`).
-2. Test pakai DATA REAL M5 (`train_features.parquet`/`test_features.parquet`, kolom `_1h`) — bukan synthetic. Target lulus **V-EXP-004** (5-seed protocol utk HMM & KM-PCA).
-3. M10.5 independen dari M6/M7/M8/M9 dan dari proses Kaggle (M8 20-run GPU) — tidak ada interaksi.
+**EKSEKUSI REAL (10-run penuh, CPU, ~1 menit):** `scripts/run_m10p5_baselines.py` dijalankan pada M5 penuh (train=26,285, test=8,760). Hasil konsisten lintas 5 seed: **HMM pilih n_components=4** (BIC terendah), **KM-PCA pilih k=2** (silhouette 0.625), **PCA=7** (explained variance: PC1≈95%, PC2≈4.8%, sisanya ~0 → full-rank). Output: `experiments/m10p5_external_baselines/external_baselines/{hmm,kmpca}/` (labels_train/test + model.pkl + selection.json per seed; 40 file). Siap dikonsumsi M11. *(experiments/ di-gitignore — artefak regenerable, tak di-commit.)*
+
+**Catatan CATATAN pilihan engineering (didokumentasikan, bukan diam-diam):** (a) HMM `covariance_type='diag'` (default hmmlearn, robust/standar utk regime detection; spec tak membatasi). (b) Tidak ada StandardScaler sebelum PCA — mengikuti spec literal "PCA + KMeans" tanpa menambah parameter tak terdokumentasi (fitur sudah turunan OHLCV & sebagian ternormalisasi). Bisa direvisit bila perlu.
+
+**Item dokumentasi tersisa (sesuai prompt, BELUM dikerjakan — perlu pass terpisah):** lipat ADR-021/022/023/**024** ke ADR Index DS-01 pada satu version bump (DS-01 v1.2). Ini churn lintas-dokumen (menyentuh version-pin di MIGRATION doc) → dikerjakan sebagai pass dokumentasi khusus, bukan disisipkan di sini. Lihat Item Terbuka #6.
 
 ## Item Terbuka
 1. **[SELESAI]** ~~Commit hash TS2Vec~~ — status "Pinned".
@@ -225,7 +216,7 @@ Mapping kondisi→branch (DS-03 Table 3.10): 1TF=[1h]→64; 2TF=[15m,1h]→128; 
    - **Metode instalasi (referensi environment setup):** `uv pip install --python .\.venv\Scripts\python.exe --only-binary=:all: "hdbscan==0.8.40" "hmmlearn==0.3.2" "scikit-learn==1.5.0"`. M10 & M10.5 kini TIDAK lagi terblokir install.
 4. `.docx` asli DS-04 (dan cek DS-03 asli) — masih berpotensi mengandung versi lama sebelum audit LC-4; relevan hanya kalau dipakai di luar repo untuk sidang/laporan. Sumber kebenaran tetap file `.md` di `docs/`.
 5. *(prioritas rendah)* Fork fallback TS2Vec — vendored copy sudah ada sebagai referensi dan kini di-import langsung (ADR-021), jadi fork eksternal kemungkinan tak perlu lagi; simpan sebagai catatan reproducibility saja.
-6. *(dokumentasi)* Lipat ADR-021/022/023 ke ADR Index DS-01 + amendemen DS-02 Stage 2/3 pada version bump DS-01/DS-02 berikutnya (saat ini standalone addendum di `docs/`).
+6. *(dokumentasi)* Lipat ADR-021/022/023/**024** ke ADR Index DS-01 (jadi DS-01 v1.2) + amendemen DS-02 Stage 2/3 & DS-03 §4 footnote pada version bump berikutnya (saat ini keempatnya standalone addendum di `docs/`). Perlu update juga referensi "DS-01 v1.1" di MIGRATION doc → v1.2. Kerjakan sebagai pass dokumentasi khusus (churn lintas-dokumen).
 
 ## TODO List Terbaru
 
@@ -237,7 +228,7 @@ Mapping kondisi→branch (DS-03 Table 3.10): 1TF=[1h]→64; 2TF=[15m,1h]→128; 
 - [x] M7 — TS2Vec Wrapper — **[SELESAI sesi 9: kode+18 test hijau; gate torch-2.3.1 terverifikasi; 2 friksi menunggu keputusan user, lihat bagian M7]**
 - [x] M8 — Branch Training — **[KODE+13 test hijau; M1-M6 diverifikasi DATA REAL; smoke-test 1 run (1h/seed42) SUKSES; 19 run sisa perlu GPU]**
 - [x] M9 — Fusion — **[KODE+39 test hijau sesi 9 (340 total); eksekusi fused-embeddings menunggu 20 checkpoint M8]**
-- [~] M10.5 — External Baselines (HMM + KM-PCA) — **IN PROGRESS, BLOCKED on KM-PCA spec decision (PENDING user)**. hmmlearn+hdbscan sudah terinstall; HMM tak ambigu; KM-PCA `PCA(10)` vs 7 fitur 1h kontradiktif → menunggu keputusan. Belum ada kode. Lihat bagian "M10.5" di atas.
+- [x] M10.5 — External Baselines (HMM + KM-PCA) — **SELESAI sesi 10: kode+12 test hijau (352 total); KM-PCA clamp→7 (ADR-024); eksekusi real 10-run sukses (HMM n=4, KM-PCA k=2). Lihat bagian "M10.5" di atas.**
 - [ ] M10 — HDBSCAN Clustering
 - [ ] M11 — Evaluation
 - [ ] M12 — Visualization (paralel M14)
