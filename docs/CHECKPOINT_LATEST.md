@@ -177,8 +177,18 @@ Dijalankan `scripts/run_m8_training.py --seeds 42 --timeframes 1h` pada window r
 - Checkpoint tertulis: `checkpoints/branch_1h/seed_42/best_model.pt` (1.13 MB) + `latest_model.pt`, plus log per-run `logs/training_branch_1h_seed_42.log`.
 - **Validasi muat-ulang:** `load_checkpoint` sukses, metadata ADR-010 benar (`checkpoint_kind=best`, `ts2vec_commit=b0088e14...`, `config_weight_decay=0.0001` vs `effective=0.01` sesuai ADR-021), `encode(test[:100]) → [100,64]` semua finite. **Pipeline end-to-end real TERBUKTI: M1 real → M2-M6 real → M8 train → checkpoint → encode.**
 
-#### Sisa yang belum dijalankan
-- **M8 — 19 run sisa (20 total, 1 sudah selesai: 1h/seed42)**. **Estimasi jujur di CPU: ~4.1 mnt/epoch × 50 epoch × ~3.4 jam/run × 20 ≈ ~68 jam (~3 hari)** — TIDAK PRAKTIS di CPU. **Rekomendasi kuat: jalankan M8 di GPU.** `run_all` idempoten/resumable (skip run yang sudah punya `best_model.pt` valid), jadi bisa dilanjutkan bertahap. Kode M8 selesai & teruji (13 test).
+#### M8 — SELESAI PENUH 20/20 (data real, GPU Kaggle) ✅
+
+Training 20 run (4 timeframe × 5 seed) selesai di Kaggle (2× T4, task-queue notebook), checkpoint di-push ke branch `kaggle-checkpoints`, lalu **ditarik ke repo lokal** (`git fetch origin kaggle-checkpoints && git checkout FETCH_HEAD -- checkpoints`; checkpoints/ di-gitignore → tidak di-commit ke `main`).
+
+**Validasi NYATA (bukan cek nama file — tiap bundle di-load):**
+- **20/20 `best_model.pt` valid**, 0 missing, 0 invalid; 20 `latest_model.pt` juga ada.
+- **`ts2vec_commit` = pin `b0088e14…` pada SEMUA 20.**
+- 19 run full 50 epoch; **1 run** (`4h/seed456`) early-stop di epoch 45 (best@34, patience) — completed sah, bukan terpotong.
+- `best_loss` konsisten per timeframe: 15m/1h ≈ 0.37, 4h ≈ 0.11, 1d ≈ 0.08 (best epoch 34–49).
+- Full suite tetap **352 passed** setelah checkpoint masuk repo lokal.
+
+**M8 kini SELESAI PENUH** (bukan lagi smoke-test) → M9 siap dijalankan dengan 20 checkpoint REAL.
 
 ### M9 — Fusion (KODE+TEST SELESAI sesi ini)
 
@@ -188,7 +198,7 @@ Mapping kondisi→branch (DS-03 Table 3.10): 1TF=[1h]→64; 2TF=[15m,1h]→128; 
 
 **Test:** [`tests/test_fusion.py`](../tests/test_fusion.py) — 39 test. Full suite: **340 passed**. Menutup V-MODEL-002/V-INV-002 ([N,256] utk 7 kondisi), V-MODEL-003/V-INV-003 (0 param trainable; P tak berubah setelah gradient step), V-MODEL-004 (deterministik per seed), ADR-013 concat order, dan 4TF-still-projected.
 
-**Catatan eksekusi:** `EmbeddingPipeline` butuh checkpoint branch (M8) untuk encode window real → embedding branch → fused. Baru 1 checkpoint real ada (1h/seed42). Menghasilkan 14 file fused/seed × 5 seed butuh 20 checkpoint M8 dulu (blocked oleh M8 full-run, lihat "Sisa yang belum dijalankan"). Logika fusi (inti M9) sudah teruji penuh dgn embedding sintetis + stub encoder.
+**Catatan eksekusi — SUDAH DIJALANKAN DENGAN DATA REAL (sesi ini):** dengan 20 checkpoint M8 real, `scripts/run_m9_fusion.py` (baru) meng-encode window M6 real → embedding branch → fused untuk 7 kondisi. Output di `experiments/m9_real/embeddings/` (gitignored): **40 file branch** (`[N,64]`, 4 tf × 5 seed × 2 split) + **70 file fused** (`[N,256]`, 7 kondisi × 5 seed × 2 split). Semua 70 fused tervalidasi `[N,256]` float32 finite; train N=26,238, test N=8,760. Test data-real baru [`tests/test_fusion_real.py`](../tests/test_fusion_real.py) (11 test): branch-encode real `[N,64]`, fusi real `[N,256]` utk 7 kondisi, determinisme, kondisi berbeda → hasil berbeda. (Logika fusi inti tetap juga teruji dgn stub di `test_fusion.py`.)
 
 ### M10.5 — External Baselines (HMM + KM-PCA) — **SELESAI (kode + test + eksekusi real 10-run)**
 
@@ -226,7 +236,7 @@ Mapping kondisi→branch (DS-03 Table 3.10): 1TF=[1h]→64; 2TF=[15m,1h]→128; 
 - [x] Persiapan migrasi Claude Code — **[SELESAI sesi ini]**
 - [ ] **[MIGRASI]** User push repo ke GitHub, buka Claude Code, jalankan `setup_and_verify.sh`
 - [x] M7 — TS2Vec Wrapper — **[SELESAI sesi 9: kode+18 test hijau; gate torch-2.3.1 terverifikasi; 2 friksi menunggu keputusan user, lihat bagian M7]**
-- [x] M8 — Branch Training — **[KODE+13 test hijau; M1-M6 diverifikasi DATA REAL; smoke-test 1 run (1h/seed42) SUKSES; 19 run sisa perlu GPU]**
+- [x] M8 — Branch Training — **[SELESAI PENUH 20/20 di GPU Kaggle; semua checkpoint di-load & tervalidasi (ts2vec_commit=pin); ditarik ke lokal]**
 - [x] M9 — Fusion — **[KODE+39 test hijau sesi 9 (340 total); eksekusi fused-embeddings menunggu 20 checkpoint M8]**
 - [x] M10.5 — External Baselines (HMM + KM-PCA) — **SELESAI sesi 10: kode+12 test hijau (352 total); KM-PCA clamp→7 (ADR-024); eksekusi real 10-run sukses (HMM n=4, KM-PCA k=2). Lihat bagian "M10.5" di atas.**
 - [ ] M10 — HDBSCAN Clustering
