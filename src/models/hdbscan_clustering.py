@@ -146,6 +146,8 @@ class HDBSCANClusterer:
             min_samples=int(ms),
             metric=METRIC,
             prediction_data=True,  # required for approximate_predict on test
+            core_dist_n_jobs=-1,   # parallelize core-distance calc (speed only;
+                                   # does not change clustering results)
         )
         labels = clusterer.fit_predict(np.ascontiguousarray(embeddings, dtype=np.float64))
         return clusterer, labels

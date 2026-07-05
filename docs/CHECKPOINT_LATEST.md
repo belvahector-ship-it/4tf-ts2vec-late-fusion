@@ -214,6 +214,23 @@ Mapping kondisi→branch (DS-03 Table 3.10): 1TF=[1h]→64; 2TF=[15m,1h]→128; 
 
 **Item dokumentasi tersisa (sesuai prompt, BELUM dikerjakan — perlu pass terpisah):** lipat ADR-021/022/023/**024** ke ADR Index DS-01 pada satu version bump (DS-01 v1.2). Ini churn lintas-dokumen (menyentuh version-pin di MIGRATION doc) → dikerjakan sebagai pass dokumentasi khusus, bukan disisipkan di sini. Lihat Item Terbuka #6.
 
+### M10 — HDBSCAN Clustering: kode selesai, TAPI metode terbukti tidak cocok pada data real → EKSPLORASI SISTEMATIS selesai, REKOMENDASI menunggu keputusan author
+
+**Ini perubahan filosofi tahap clustering (keputusan riset author, sesi 11), bukan tweak parameter.** Kronologi jujur (untuk metodologi/pembahasan paper):
+
+1. **Kode M10 sesuai spec selesai & teruji** (`src/models/hdbscan_clustering.py` + 12 test + `scripts/run_m10_clustering.py`, commit `f693298`) — implementasi ADR-004/ADR-018 faithful (grid 1TF → lock → apply, `approximate_predict`, fallback, R-08 tiebreak, parquet Stage 8).
+2. **Data real menolaknya:** HDBSCAN raw 256-dim → k=38 + 70% noise (mcs=100) atau k=0/100% noise (mcs besar); ~6 mnt/fit. UMAP(5/10/15)+HDBSCAN grid penuh (216 run, 2 seed × 4 kondisi): 1TF/2TF bisa capai 2≤k≤8, **3TF/4TF TIDAK PERNAH < k=33**. Konstraint "2≤k≤8 via HDBSCAN" tak terpenuhi lintas kondisi.
+3. **Keputusan author:** k≤8-via-HDBSCAN adalah SARANA bukan tujuan; tujuan = representasi market state yang bermakna/universal. Perintah: pahami struktur data dulu (EDA), landasi literatur, coba metode non-density, dokumentasikan SEMUA (termasuk yang gagal), lalu REKOMENDASI (bukan keputusan sepihak). M1–M9 tak boleh disentuh — dan memang TIDAK disentuh.
+4. **Eksplorasi lengkap terdokumentasi di [docs/M10_CLUSTERING_EXPLORATION.md](M10_CLUSTERING_EXPLORATION.md)** (+ CSV di `experiments/m10_exploration/`, figur UMAP di `docs/figures/`). Temuan inti:
+   - **Literatur:** regime detection memakai k-means/GMM/HMM dengan k kecil (2–5); density-based praktis absen. HMM internal kita (M10.5) memilih 4 state via BIC.
+   - **EDA:** Hopkins 0.91–0.92 semua kondisi (struktur KUAT, embedding TIDAK buruk); intrinsic-dim naik 27→72 PC (1TF→4TF, konsisten 2 seed — fusion memang menambah informasi); distance-concentration memburuk (CV 0.172→0.111) = akar kegagalan density method.
+   - **Visual/probe:** embedding = filamen temporal (window stride-1 overlap 47/48) yang membentuk micro-pattern berulang skala ~1 hari (median 4 run/cluster HDBSCAN, k≈195) — HDBSCAN menangkap rekurensi mikro, bukan state makro. (Hipotesis "cluster=filamen murni" DIREVISI setelah diuji — kejujuran proses.)
+   - **Perbandingan metode** (KMeans/GMM-diag/Ward × k=2–12 × 4 kondisi × 2 seed): KMeans≈GMM valid di SEMUA kondisi; best-k silhouette 2–3; persistensi 17–33 jam (regime-like); ARI antar-seed 0.51–0.74 (>> random). **Temuan negatif jujur:** GMM BIC argmin selalu di batas grid (k=12) → BIC bukan selektor k yang usable; Ward konsisten kalah.
+   - **Validitas ekonomi:** KW return p<1e-13 & vol p hingga 1e-146 di SEMUA konfigurasi; k=4 = bull/bear/calm/choppy yang interpretable KONSISTEN lintas kondisi & metode; **separasi return MENGUAT di 3TF/4TF** (KW H k=4: 67.6→83.0; bull/bear ±8bp→±10bp) — bukti mendukung hipotesis utama riset.
+5. **REKOMENDASI (menunggu keputusan author, belum diimplementasi):** ganti HDBSCAN → **KMeans dengan k TETAP identik lintas kondisi; primer k=4; sensitivitas k∈{3,5,6,8}**. Test labels via nearest-centroid. Fixed-k justru pengendalian eksperimen yang lebih bersih daripada locked-HDBSCAN-params (yang menghasilkan k 3 vs 40 antar kondisi). k≤8 (semangat ADR-018) tetap terpenuhi. Bila disetujui: ADR baru (supersede pilihan algoritma ADR-004), rewrite DS-02 Stage 8, rework modul M10 + test, lalu run real 35 clustering (7 kondisi × 5 seed). Kode HDBSCAN disimpan di repo sebagai negative result terdokumentasi.
+
+**Status M10: PAUSED menunggu keputusan author atas rekomendasi di atas.** Full suite tetap 375 passed; M1–M9 + M10.5 tidak berubah.
+
 ## Item Terbuka
 1. **[SELESAI]** ~~Commit hash TS2Vec~~ — status "Pinned".
 2. **[SELESAI — terlewati]** ~~Jalankan `setup_and_verify.sh`~~ — tujuannya (buktikan M0–M6 lulus di environment penuh) sudah tercapai jauh melampaui itu: venv 3.11 dibuat, 301 test lulus, pipeline M1–M6 diverifikasi dengan DATA REAL, bahkan M8 smoke-test 1 run sukses. Skrip `.sh` aslinya tak bisa jalan apa adanya (lihat Sesi 9) dan sudah tidak relevan.
@@ -239,7 +256,7 @@ Mapping kondisi→branch (DS-03 Table 3.10): 1TF=[1h]→64; 2TF=[15m,1h]→128; 
 - [x] M8 — Branch Training — **[SELESAI PENUH 20/20 di GPU Kaggle; semua checkpoint di-load & tervalidasi (ts2vec_commit=pin); ditarik ke lokal]**
 - [x] M9 — Fusion — **[KODE+39 test hijau sesi 9 (340 total); eksekusi fused-embeddings menunggu 20 checkpoint M8]**
 - [x] M10.5 — External Baselines (HMM + KM-PCA) — **SELESAI sesi 10: kode+12 test hijau (352 total); KM-PCA clamp→7 (ADR-024); eksekusi real 10-run sukses (HMM n=4, KM-PCA k=2). Lihat bagian "M10.5" di atas.**
-- [ ] M10 — HDBSCAN Clustering
+- [~] M10 — Clustering — **[kode HDBSCAN selesai+teruji TAPI metode terbukti tak cocok di data real; eksplorasi sistematis selesai (docs/M10_CLUSTERING_EXPLORATION.md); REKOMENDASI: KMeans fixed-k=4 lintas kondisi — MENUNGGU KEPUTUSAN AUTHOR]**
 - [ ] M11 — Evaluation
 - [ ] M12 — Visualization (paralel M14)
 - [ ] M14 — Statistical Analysis (paralel M12)
