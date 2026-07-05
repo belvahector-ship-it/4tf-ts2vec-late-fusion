@@ -229,7 +229,18 @@ Mapping kondisi→branch (DS-03 Table 3.10): 1TF=[1h]→64; 2TF=[15m,1h]→128; 
    - **Validitas ekonomi:** KW return p<1e-13 & vol p hingga 1e-146 di SEMUA konfigurasi; k=4 = bull/bear/calm/choppy yang interpretable KONSISTEN lintas kondisi & metode; **separasi return MENGUAT di 3TF/4TF** (KW H k=4: 67.6→83.0; bull/bear ±8bp→±10bp) — bukti mendukung hipotesis utama riset.
 5. **REKOMENDASI (menunggu keputusan author, belum diimplementasi):** ganti HDBSCAN → **KMeans dengan k TETAP identik lintas kondisi; primer k=4; sensitivitas k∈{3,5,6,8}**. Test labels via nearest-centroid. Fixed-k justru pengendalian eksperimen yang lebih bersih daripada locked-HDBSCAN-params (yang menghasilkan k 3 vs 40 antar kondisi). k≤8 (semangat ADR-018) tetap terpenuhi. Bila disetujui: ADR baru (supersede pilihan algoritma ADR-004), rewrite DS-02 Stage 8, rework modul M10 + test, lalu run real 35 clustering (7 kondisi × 5 seed). Kode HDBSCAN disimpan di repo sebagai negative result terdokumentasi.
 
-**Status M10: PAUSED menunggu keputusan author atas rekomendasi di atas.** Full suite tetap 375 passed; M1–M9 + M10.5 tidak berubah.
+**Status M10: FINAL — LOCKED (sesi 13, HARD STOP eksplorasi).** Keputusan difinalkan: **KMeans, k TETAP identik lintas kondisi, k primer=4, sensitivitas k∈{3,5,6,8}, test via nearest-centroid** — diformalkan di **ADR-025** ([docs/ADR-025_kmeans_fixed_k_supersedes_hdbscan.md](ADR-025_kmeans_fixed_k_supersedes_hdbscan.md), men-supersede pilihan algoritma ADR-004). Ringkasan metodologi lengkap sesi 11–13: **[docs/M10_FINAL_METHODOLOGY.md](M10_FINAL_METHODOLOGY.md)**.
+
+**Diagnostik value-add (dilaporkan apa adanya, sesi 12–13):**
+- **CKA lintas-kondisi** ([DIAGNOSTIC_CKA_LINEARPROBE.md](DIAGNOSTIC_CKA_LINEARPROBE.md)): 1TF↔4TF≈0.76–0.78, menurun monoton, konsisten 2 seed → fusion menghasilkan representasi **berbeda substansial** (bukan redundan). **Mendukung klaim inti.**
+- **Linear probe head-to-head:** `return_t+1` R²≈0 untuk semua metode (efficient-market); `volatility_t+1` **fitur mentah MENGALAHKAN TS2Vec telak** (raw R² 0.09→0.43 naik dgn TF; TS2Vec R² NEGATIF −0.81…−1.03) — **tidak ada bukti TS2Vec unggul utk forecasting linear**; dilaporkan jujur.
+- **Shape-scale decomposition** ([DIAGNOSTIC_SHAPE_SCALE_DECOMPOSITION.md](DIAGNOSTIC_SHAPE_SCALE_DECOMPOSITION.md)): hasil **CAMPURAN/PARSIAL** (bukan konfirmasi bersih; Tes A embedding R²=0.28–0.48 bukan ~0, anomali 4TF; Tes C ada confound temporal-adjacency 95–100%). **Kesimpulan resmi terkalibrasi (verbatim, jangan diperkuat/dilemahkan):** *"Normalisasi per-window secara signifikan MENGURANGI — bukan sepenuhnya menghilangkan — kandungan informasi skala pada embedding, dengan bukti kuantitatif campuran; window overlap (stride-1) menimbulkan confound temporal yang membatasi kesimpulan tegas dari uji retrieval."*
+
+**Verdict 3 klaim inti riset (tetap TERBUKTI KUAT meski klaim shape-scale spesifik butuh bahasa terkalibrasi):** (1) multi-TF menambah nilai — **KUAT** (CKA, intrinsic-dim, KW-H 67.6→83.0); (2) representasi bermakna utk **discovery, bukan forecasting** — **TERBUKTI** (state ekonomik terpisah p<1e-13 vs probe linear lemah); (3) concat+fixed-projection desain tepat — **TERBUKTI** (JL quasi-isometry dist-corr 0.91–0.96, 0 param trainable, bukan penyebab fragmentasi).
+
+**Dissection matematis** ([PIPELINE_SCIENTIFIC_DISSECTION.md](PIPELINE_SCIENTIFIC_DISSECTION.md)): seluruh geometri (HDBSCAN gagal, intrinsic-dim naik, distance-concentration naik, KMeans membaik) adalah **konsekuensi teoretis terprediksi**, bukan kegagalan acak — didukung pengukuran + literatur.
+
+**HARD STOP:** tidak ada tes diagnostik baru lagi. Fase berikutnya (mekanis): rework modul M10 → `KMeansStateClusterer` (kode HDBSCAN disimpan sbg negative result), update test, jalankan **35-run konfirmatori** (7 kondisi × 5 seed) di embedding M9 yang ada. Full suite tetap 375 passed; M1–M9 + M10.5 tidak berubah. *(Item dokumentasi tertunda: lipat ADR-025 ke DS-01 Index + rewrite DS-02 Stage 8 pada version bump berikutnya.)*
 
 ## Item Terbuka
 1. **[SELESAI]** ~~Commit hash TS2Vec~~ — status "Pinned".
@@ -256,7 +267,8 @@ Mapping kondisi→branch (DS-03 Table 3.10): 1TF=[1h]→64; 2TF=[15m,1h]→128; 
 - [x] M8 — Branch Training — **[SELESAI PENUH 20/20 di GPU Kaggle; semua checkpoint di-load & tervalidasi (ts2vec_commit=pin); ditarik ke lokal]**
 - [x] M9 — Fusion — **[KODE+39 test hijau sesi 9 (340 total); eksekusi fused-embeddings menunggu 20 checkpoint M8]**
 - [x] M10.5 — External Baselines (HMM + KM-PCA) — **SELESAI sesi 10: kode+12 test hijau (352 total); KM-PCA clamp→7 (ADR-024); eksekusi real 10-run sukses (HMM n=4, KM-PCA k=2). Lihat bagian "M10.5" di atas.**
-- [~] M10 — Clustering — **[kode HDBSCAN selesai+teruji TAPI metode terbukti tak cocok di data real; eksplorasi sistematis selesai (docs/M10_CLUSTERING_EXPLORATION.md); REKOMENDASI: KMeans fixed-k=4 lintas kondisi — MENUNGGU KEPUTUSAN AUTHOR]**
+- [x] M10 — Clustering (metode) — **[FINAL/LOCKED sesi 13: KMeans fixed-k=4 (sensitivitas k∈{3,5,6,8}), ADR-025 supersede ADR-004. HDBSCAN disimpan sbg negative result. Eksekusi 35-run konfirmatori = fase berikutnya]**
+  - [ ] M10 eksekusi — rework modul → KMeansStateClusterer + test + run 35 clustering real (7 kondisi × 5 seed)
 - [ ] M11 — Evaluation
 - [ ] M12 — Visualization (paralel M14)
 - [ ] M14 — Statistical Analysis (paralel M12)
